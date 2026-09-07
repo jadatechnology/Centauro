@@ -1,0 +1,126 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background-color: #f1f5f9;
+  overflow-wrap: break-word;
+}
+
+/* Evita la barra horizontal en movil */
+html,
+body {
+  overflow-x: hidden;
+  overflow-x: clip;
+}
+
+/* Evita que el contenido largo desborde grillas y filas flexibles */
+.flex > *,
+.grid > * {
+  min-width: 0;
+}
+
+/* Tablas: en movil se convierten en tarjetas apiladas (sin scroll lateral) */
+@media (max-width: 640px) {
+  .table-responsive {
+    display: block;
+    width: 100%;
+  }
+  .table-responsive thead {
+    display: none;
+  }
+  .table-responsive tbody {
+    display: block;
+  }
+  .table-responsive tr {
+    display: block;
+    padding: 0.75rem 0.25rem;
+  }
+  .table-responsive td {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.3rem 0;
+    border: none;
+  }
+  .table-responsive td::before {
+    content: attr(data-label);
+    font-size: 11px;
+    color: #94a3b8;
+    text-transform: uppercase;
+    flex-shrink: 0;
+  }
+  .table-responsive td[data-no-label]::before,
+  .table-responsive td[data-label=""]::before {
+    content: none;
+  }
+}
+
+/* En movil los campos de texto usan 16px para evitar el zoom automatico de iOS */
+/* En movil los campos usan 16px (con prioridad sobre las clases text-sm de Tailwind)
+   para evitar el zoom automatico de iOS al enfocar un campo */
+@media (max-width: 640px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}
+
+/* Los campos de fecha no deben desbordar la pantalla en movil */
+input[type='date'] {
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Campos de texto: solo la inicial de cada palabra en mayuscula */
+input[type='text'],
+input[type='tel'],
+input[type='url'],
+textarea,
+select {
+  text-transform: capitalize;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #94a3b8;
+  border-radius: 3px;
+}
+
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.safe-top {
+  padding-top: env(safe-area-inset-top, 0);
+}
+
+.safe-x {
+  padding-left: env(safe-area-inset-left, 0);
+  padding-right: env(safe-area-inset-right, 0);
+}
+
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
