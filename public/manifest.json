@@ -1,6 +1,6 @@
 {
-  "name": "Mi Tienda",
-  "short_name": "Mi Tienda",
+  "name": "Centauro",
+  "short_name": "Centauro",
   "description": "Inventario, clientes, ventas y creditos",
   "start_url": "/",
   "display": "standalone",

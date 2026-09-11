@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import QRCode from 'qrcode'
 import { getProduct, createProduct, updateProduct } from '../services/productService'
+import { getStoreConfig } from '../services/configService'
+import { useSede } from '../context/SedeContext'
 import type { Product } from '../types'
 import Icon from '../components/Icon'
 import Spinner from '../components/Spinner'
@@ -22,6 +24,7 @@ export default function ProductForm() {
   const { id } = useParams()
   const navigate = useNavigate()
   const isEdit = Boolean(id)
+  const { sedes, sede, puedeCambiarSede } = useSede()
 
   const [form, setForm] = useState({
     nombre: '',
@@ -30,16 +33,24 @@ export default function ProductForm() {
     codigo: '',
     costo: '',
     precio: '',
-    stock: '',
     stockMinimo: '0',
     vencimiento: '',
     ubicacion: '',
   })
+  const [stockPorSede, setStockPorSede] = useState<Record<string, string>>({})
+  const [prevStockPorSede, setPrevStockPorSede] = useState<Record<string, number>>({})
   const [loading, setLoading] = useState(isEdit)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [qrUrl, setQrUrl] = useState('')
   const [scannerOpen, setScannerOpen] = useState(false)
+  const [usarVencimiento, setUsarVencimiento] = useState(true)
+
+  useEffect(() => {
+    getStoreConfig()
+      .then((cfg) => setUsarVencimiento(cfg.usarVencimiento ?? true))
+      .catch(() => {})
+  }, [])
 
   useEffect(() => {
     if (!id) return
@@ -53,17 +64,22 @@ export default function ProductForm() {
             codigo: p.codigo,
             costo: String(p.costo ?? 0),
             precio: String(p.precio ?? 0),
-            stock: String(p.stock ?? 0),
             stockMinimo: String(p.stockMinimo ?? 0),
             vencimiento: p.vencimiento || '',
             ubicacion: p.ubicacion || '',
           })
+          const porSede: Record<string, string> = {}
+          for (const s of sedes) {
+            porSede[s.id!] = String(p.stockPorSede?.[s.id!] ?? '')
+          }
+          setStockPorSede(porSede)
+          setPrevStockPorSede({ ...(p.stockPorSede ?? {}) })
         } else {
           setError('Producto no encontrado')
         }
       })
       .finally(() => setLoading(false))
-  }, [id])
+  }, [id, sedes])
 
   useEffect(() => {
     if (!form.codigo) {
@@ -81,11 +97,23 @@ export default function ProductForm() {
     e.preventDefault()
     setError('')
     if (!form.nombre.trim()) return setError('El nombre es obligatorio.')
-    if (!form.codigo.trim()) return setError('El codigo es obligatorio.')
+    if (form.codigo.trim() && !form.precio) return setError('El precio debe ser mayor que 0.')
     if (!form.precio || Number(form.precio) <= 0) return setError('El precio debe ser mayor que 0.')
 
-    setSaving(true)
+setSaving(true)
     try {
+      // Los administradores pueden editar el stock de todas las sedes;
+      // un usuario normal solo modifica el stock de su sede activa y conserva el de las demas.
+      const porSede: Record<string, number> = { ...prevStockPorSede }
+      if (!puedeCambiarSede) {
+        for (const s of sedes) delete porSede[s.id!]
+      }
+      for (const s of sedes) {
+        if (puedeCambiarSede || (sede && s.id === sede.id)) {
+          porSede[s.id!] = Number(stockPorSede[s.id!]) || 0
+        }
+      }
+      const stockTotal = Object.values(porSede).reduce((a, b) => a + b, 0)
       const data = {
         nombre: form.nombre.trim(),
         descripcion: form.descripcion.trim(),
@@ -93,8 +121,9 @@ export default function ProductForm() {
         codigo: form.codigo.trim(),
         costo: Number(form.costo) || 0,
         precio: Number(form.precio) || 0,
-        stock: Number(form.stock) || 0,
+        stock: stockTotal,
         stockMinimo: Number(form.stockMinimo) || 0,
+        stockPorSede: porSede,
         vencimiento: form.vencimiento.trim() || '',
         ubicacion: form.ubicacion.trim() || '',
         activo: true,
@@ -142,7 +171,7 @@ export default function ProductForm() {
                 <input className={inputCls} value={form.categoria} onChange={(e) => set('categoria', e.target.value)} placeholder="Ej: Electronica" />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Codigo de barras *</label>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Codigo de barras (opcional)</label>
                 <div className="flex gap-2">
                   <input
                     className={inputCls}
@@ -192,7 +221,7 @@ export default function ProductForm() {
           />
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Costo</label>
             <input type="number" step="0.01" min="0" className={inputCls} value={form.costo} onChange={(e) => set('costo', e.target.value)} />
@@ -202,37 +231,80 @@ export default function ProductForm() {
             <input type="number" step="0.01" min="0" className={inputCls} value={form.precio} onChange={(e) => set('precio', e.target.value)} />
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Stock</label>
-            <input type="number" min="0" className={inputCls} value={form.stock} onChange={(e) => set('stock', e.target.value)} />
-          </div>
-          <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Stock minimo</label>
             <input type="number" min="0" className={inputCls} value={form.stockMinimo} onChange={(e) => set('stockMinimo', e.target.value)} />
           </div>
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1">Fecha de vencimiento (opcional)</label>
-          <div className="flex gap-2">
-            <input
-              type="date"
-              className={`${inputCls} flex-1 min-w-0`}
-              value={form.vencimiento}
-              onChange={(e) => set('vencimiento', e.target.value)}
-            />
-            {form.vencimiento && (
-              <button
-                type="button"
-                onClick={() => set('vencimiento', '')}
-                className="shrink-0 px-3 py-2.5 rounded-xl border border-slate-300 text-slate-600 text-sm font-medium hover:bg-slate-100"
-                title="Quitar la fecha de vencimiento"
-              >
-                Quitar
-              </button>
-            )}
-          </div>
-          <p className="text-xs text-slate-400 mt-1">Dejar vacio si el producto no vence.</p>
+          <label className="block text-sm font-medium text-slate-700 mb-2">Stock por sede</label>
+          {!puedeCambiarSede && !sede && (
+            <div className="mb-2 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-xs">
+              Tu cuenta no tiene una sede asignada. Pide al administrador que te asigne una sede para poder editar el
+              stock.
+            </div>
+          )}
+          {sedes.length === 0 ? (
+            <p className="text-xs text-slate-400">Se cargaran las sedes...</p>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              {sedes.map((s) => {
+                const editable = puedeCambiarSede || (sede && s.id === sede.id)
+                return (
+                  <div key={s.id}>
+                    <label className="block text-[11px] font-medium text-slate-500 mb-1">
+                      {s.nombre}
+                      {!editable && <span className="font-normal text-slate-400"> (solo lectura)</span>}
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      className={`${inputCls} ${editable ? '' : 'bg-slate-50 text-slate-500'}`}
+                      value={stockPorSede[s.id!] ?? ''}
+                      onChange={(e) =>
+                        setStockPorSede((prev) => ({ ...prev, [s.id!]: e.target.value }))
+                      }
+                      readOnly={!editable}
+                      tabIndex={editable ? 0 : -1}
+                      placeholder="0"
+                      title={editable ? '' : 'Stock de otra sede (solo lectura)'}
+                    />
+                  </div>
+                )
+              })}
+            </div>
+          )}
+          <p className="text-xs text-slate-400 mt-1">
+            {puedeCambiarSede
+              ? `Cada sede maneja su propio inventario. Total: ${Object.values(stockPorSede).reduce((a, b) => a + (Number(b) || 0), 0)} uds.`
+              : `Puede ver el stock de todas las sedes, pero solo puede modificar el de su sede asignada.`}
+          </p>
         </div>
+
+        {usarVencimiento && (
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Fecha de vencimiento (opcional)</label>
+            <div className="flex gap-2">
+              <input
+                type="date"
+                className={`${inputCls} flex-1 min-w-0`}
+                value={form.vencimiento}
+                onChange={(e) => set('vencimiento', e.target.value)}
+              />
+              {form.vencimiento && (
+                <button
+                  type="button"
+                  onClick={() => set('vencimiento', '')}
+                  className="shrink-0 px-3 py-2.5 rounded-xl border border-slate-300 text-slate-600 text-sm font-medium hover:bg-slate-100"
+                  title="Quitar la fecha de vencimiento"
+                >
+                  Quitar
+                </button>
+              )}
+            </div>
+            <p className="text-xs text-slate-400 mt-1">Dejar vacio si el producto no vence.</p>
+          </div>
+        )}
 
         {error && (
           <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>

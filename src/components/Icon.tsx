@@ -133,6 +133,12 @@ const paths: Record<string, React.ReactNode> = {
       <path d="M12 15V3" />
     </>
   ),
+  map: (
+    <>
+      <path d="M9 20 3 17V4l6 3 6-3 6 3v13l-6-3-6 3Z" />
+      <path d="M9 7v13M15 4v13" />
+    </>
+  ),
 }
 
 export default function Icon({ name, size = 20, className = '' }: IconProps) {

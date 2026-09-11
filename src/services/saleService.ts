@@ -8,10 +8,11 @@ import {
   getDoc,
   setDoc,
   updateDoc,
+  deleteDoc,
   increment,
 } from 'firebase/firestore'
 import { db } from '../config/firebase'
-import type { Sale, SaleItem, PaymentRecord } from '../types'
+import type { Sale, SaleItem, PaymentRecord, Devolucion } from '../types'
 import { round2, titleCase } from '../utils/format'
 
 const col = collection(db, 'ventas')
@@ -37,6 +38,8 @@ export interface CreateSaleInput {
   clienteId: string | null
   clienteNombre: string
   usuario: string
+  sedeId?: string | null
+  sedeNombre?: string
 }
 
 export async function createSale(input: CreateSaleInput): Promise<string> {
@@ -94,6 +97,8 @@ export async function createSale(input: CreateSaleInput): Promise<string> {
     clienteNombre: titleCase(input.clienteNombre),
     pagos,
     usuario: input.usuario,
+    sedeId: input.sedeId ?? undefined,
+    sedeNombre: input.sedeNombre ?? '',
     createdAt: Date.now(),
   }
 
@@ -101,6 +106,7 @@ export async function createSale(input: CreateSaleInput): Promise<string> {
 
   // Stock: decremento atomico por producto (sin transaccion global).
   // Los articulos sueltos (sin inventario) no descuentan stock.
+  // Si el producto tiene stock por sede, se descuenta la sede indicada.
   await Promise.all(
     items
       .filter((item) => item.productoId && !item.suelto)
@@ -108,10 +114,19 @@ export async function createSale(input: CreateSaleInput): Promise<string> {
         const ref = doc(db, 'productos', item.productoId)
         const snap = await getDoc(ref)
         if (snap.exists()) {
-          await updateDoc(ref, {
-            stock: increment(-item.cantidad),
-            updatedAt: Date.now(),
-          })
+          const data = snap.data()
+          const tienePorSede = data.stockPorSede && typeof data.stockPorSede === 'object'
+          if (tienePorSede && input.sedeId) {
+            await updateDoc(ref, {
+              [`stockPorSede.${input.sedeId}`]: increment(-item.cantidad),
+              updatedAt: Date.now(),
+            })
+          } else {
+            await updateDoc(ref, {
+              stock: increment(-item.cantidad),
+              updatedAt: Date.now(),
+            })
+          }
         }
       })
   )
@@ -140,5 +155,54 @@ export async function addPayment(
   await updateDoc(ref, {
     saldo: nuevoSaldo,
     pagos: [...(venta.pagos ?? []), pago],
+  })
+}
+
+async function restaurarStock(items: Array<{ productoId: string; cantidad: number; suelto?: boolean }>, sedeId?: string | null) {
+  await Promise.all(
+    items
+      .filter((item) => item.productoId && !item.suelto)
+      .map(async (item) => {
+        const ref = doc(db, 'productos', item.productoId)
+        const snap = await getDoc(ref)
+        if (!snap.exists()) return
+        const data = snap.data()
+        const tienePorSede = data.stockPorSede && typeof data.stockPorSede === 'object'
+        if (tienePorSede && sedeId) {
+          await updateDoc(ref, {
+            [`stockPorSede.${sedeId}`]: increment(item.cantidad),
+            updatedAt: Date.now(),
+          })
+        } else {
+          await updateDoc(ref, {
+            stock: increment(item.cantidad),
+            updatedAt: Date.now(),
+          })
+        }
+      })
+  )
+}
+
+export async function deleteSale(venta: Sale) {
+  await restaurarStock(venta.items, venta.sedeId)
+  await deleteDoc(doc(db, 'ventas', venta.id!))
+}
+
+export async function registrarDevolucion(
+  venta: Sale,
+  devolucion: Devolucion
+) {
+  await restaurarStock(devolucion.items, venta.sedeId)
+  const nuevoSubtotal = round2(Math.max(venta.subtotal - devolucion.monto, 0))
+  const nuevoTotal = round2(Math.max(venta.total - devolucion.monto, 0))
+  let nuevoSaldo = venta.saldo ?? 0
+  if (venta.tipo === 'credito') {
+    nuevoSaldo = round2(Math.max(nuevoSaldo - devolucion.monto, 0))
+  }
+  await updateDoc(doc(db, 'ventas', venta.id!), {
+    total: nuevoTotal,
+    subtotal: nuevoSubtotal,
+    saldo: nuevoSaldo,
+    devoluciones: [...(venta.devoluciones ?? []), devolucion],
   })
 }

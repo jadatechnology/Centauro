@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { getSales } from '../services/saleService'
+import { getSales, deleteSale } from '../services/saleService'
 import { getStoreConfig } from '../services/configService'
 import { startOfDay, startOfMonth } from '../services/statsService'
+import { useSede } from '../context/SedeContext'
 import type { Sale, StoreConfig } from '../types'
 import { formatMoney, formatDateTime } from '../utils/format'
 import Icon from '../components/Icon'
@@ -16,9 +17,14 @@ export default function SalesList() {
   const [periodo, setPeriodo] = useState<Periodo>('hoy')
   const [tipo, setTipo] = useState<'todas' | 'contado' | 'credito'>('todas')
   const [search, setSearch] = useState('')
+  const { sede, puedeCambiarSede } = useSede()
+  const [soloSede, setSoloSede] = useState(true)
   const [config, setConfig] = useState<StoreConfig>({
     company: '', slogan: '', taxRegime: '', address: '', phone: '', receiptFooter: '', currencySymbol: '$', receiptMode: 'auto',
   })
+
+  // Los usuarios que no son administradores solo ven su sede activa
+  const verSoloSede = !puedeCambiarSede || soloSede
 
   useEffect(() => {
     let active = true
@@ -42,6 +48,7 @@ export default function SalesList() {
     const now = Date.now()
     const q = search.trim().toLowerCase()
     return sales
+      .filter((v) => (verSoloSede && sede ? !v.sedeId || v.sedeId === sede.id : true))
       .filter((v) => (periodo === 'hoy' ? v.createdAt >= startOfDay(now) : periodo === 'mes' ? v.createdAt >= startOfMonth(now) : true))
       .filter((v) => (tipo === 'todas' ? true : v.tipo === tipo))
       .filter(
@@ -51,7 +58,7 @@ export default function SalesList() {
           (v.clienteNombre || '').toLowerCase().includes(q) ||
           (v.usuario || '').toLowerCase().includes(q)
       )
-  }, [sales, periodo, tipo, search])
+  }, [sales, periodo, tipo, search, verSoloSede, sede])
 
   const sym = config.currencySymbol || '$'
   const totalFiltrado = filtered.reduce((acc, v) => acc + (v.total ?? 0), 0)
@@ -94,6 +101,17 @@ export default function SalesList() {
             </button>
           ))}
         </div>
+        {puedeCambiarSede && sede && (
+          <button
+            onClick={() => setSoloSede((v) => !v)}
+            title={soloSede ? `Mostrando solo ${sede.nombre}` : 'Mostrando todas las sedes'}
+            className={`px-3 py-2 rounded-xl text-sm font-medium ${
+              soloSede ? 'bg-teal-600 text-white' : 'bg-white border border-slate-300 text-slate-600'
+            }`}
+          >
+            {soloSede ? `Solo ${sede.nombre}` : 'Todas las sedes'}
+          </button>
+        )}
         <div className="relative flex-1">
           <Icon name="search" size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
@@ -122,9 +140,11 @@ export default function SalesList() {
                   <th className="px-4 py-3">Recibo</th>
                   <th className="px-4 py-3 hidden sm:table-cell">Fecha</th>
                   <th className="px-4 py-3">Cliente</th>
+                  <th className="px-4 py-3 hidden md:table-cell">Sede</th>
                   <th className="px-4 py-3 hidden md:table-cell">Tipo</th>
                   <th className="px-4 py-3 text-right">Total</th>
                   <th className="px-4 py-3 text-right">Saldo</th>
+                  {puedeCambiarSede && <th className="px-4 py-3 text-right">Acciones</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -138,6 +158,9 @@ export default function SalesList() {
                     </td>
                     <td className="px-4 py-3 text-slate-500 hidden sm:table-cell" data-label="Fecha">{formatDateTime(v.createdAt)}</td>
                     <td className="px-4 py-3 text-slate-700" data-label="Cliente">{v.clienteNombre || <span className="text-slate-400">Consumidor final</span>}</td>
+                    <td className="px-4 py-3 hidden md:table-cell text-slate-500" data-label="Sede">
+                      {v.sedeNombre || <span className="text-slate-300">-</span>}
+                    </td>
                     <td className="px-4 py-3 hidden md:table-cell" data-label="Tipo">
                       <span
                         className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
@@ -155,6 +178,21 @@ export default function SalesList() {
                         <span className="text-emerald-600">-</span>
                       )}
                     </td>
+                    {puedeCambiarSede && (
+                      <td className="px-4 py-3 text-right" data-no-label>
+                        <button
+                          onClick={async () => {
+                            if (!window.confirm(`Eliminar la venta #${v.folio}? Se restaurara el stock vendido. Esta accion no se puede deshacer.`)) return
+                            await deleteSale(v)
+                            setSales((prev) => prev.filter((s) => s.id !== v.id))
+                          }}
+                          className="p-1.5 rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600"
+                          title="Eliminar venta (solo administrador)"
+                        >
+                          <Icon name="trash" size={16} />
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>

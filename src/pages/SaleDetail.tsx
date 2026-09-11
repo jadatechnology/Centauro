@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { getSale, addPayment } from '../services/saleService'
+import { getSale, addPayment, registrarDevolucion } from '../services/saleService'
 import { getStoreConfig } from '../services/configService'
 import { useAuth } from '../context/AuthContext'
-import type { Sale, StoreConfig } from '../types'
-import { formatMoney, formatDateTime } from '../utils/format'
+import { useSede } from '../context/SedeContext'
+import type { Sale, StoreConfig, Devolucion, DevolucionItem } from '../types'
+import { formatMoney, formatDateTime, round2 } from '../utils/format'
 import { printReceipt, getReceiptWidth } from '../utils/print'
 import { openReceiptPdf } from '../utils/receiptPdf'
+import { playError } from '../utils/sound'
 import Icon from '../components/Icon'
 import Spinner from '../components/Spinner'
 import Modal from '../components/Modal'
@@ -14,12 +16,14 @@ import Modal from '../components/Modal'
 export default function SaleDetail() {
   const { id } = useParams()
   const { user, nombre } = useAuth()
+  const { sede, puedeCambiarSede } = useSede()
   const [sale, setSale] = useState<Sale | null>(null)
   const [config, setConfig] = useState<StoreConfig>({
     company: '', slogan: '', taxRegime: '', address: '', phone: '', receiptFooter: '', currencySymbol: '$', receiptMode: 'auto',
   })
   const [loading, setLoading] = useState(true)
   const [payOpen, setPayOpen] = useState(false)
+  const [devOpen, setDevOpen] = useState(false)
 
   useEffect(() => {
     if (!id) return
@@ -28,6 +32,11 @@ export default function SaleDetail() {
       try {
         const [s, cfg] = await Promise.all([getSale(id), getStoreConfig()])
         if (!active) return
+        // Un usuario que no es administrador no puede ver ventas de otra sede
+        if (s && s.sedeId && !puedeCambiarSede && sede && s.sedeId !== sede.id) {
+          setSale(null)
+          return
+        }
         setSale(s)
         setConfig(cfg)
       } finally {
@@ -38,7 +47,7 @@ export default function SaleDetail() {
     return () => {
       active = false
     }
-  }, [id])
+  }, [id, sede, puedeCambiarSede])
 
   const sym = config.currencySymbol || '$'
 
@@ -84,6 +93,14 @@ export default function SaleDetail() {
             <Icon name="print" size={15} />
             Imprimir
           </button>
+          <button
+            onClick={() => setDevOpen(true)}
+            className="px-3 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-sm font-semibold flex items-center gap-1.5 w-full sm:w-auto justify-center"
+            title="Registrar devolucion"
+          >
+            <Icon name="x" size={15} />
+            Devolucion
+          </button>
         </div>
       </div>
 
@@ -93,6 +110,12 @@ export default function SaleDetail() {
             <div className="text-xs text-slate-400">Cliente</div>
             <div className="font-semibold text-slate-800">
               {sale.clienteNombre || 'Consumidor final'}
+            </div>
+          </div>
+          <div>
+            <div className="text-xs text-slate-400">Sede</div>
+            <div className="font-semibold text-slate-800">
+              {sale.sedeNombre || <span className="text-slate-400">-</span>}
             </div>
           </div>
           <div>
@@ -119,17 +142,24 @@ export default function SaleDetail() {
       <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
         <h2 className="font-bold text-slate-800 px-4 py-3 border-b border-slate-100">Productos</h2>
         <ul className="divide-y divide-slate-100">
-          {sale.items.map((it, i) => (
-            <li key={i} className="flex items-center justify-between px-4 py-2.5 text-sm">
-              <div>
-                <div className="font-semibold text-slate-800">{it.nombre}</div>
+          {sale.items.map((it, i) => {
+            const pct = it.descuentoPct || 0
+            const net = round2(it.subtotal * (1 - pct / 100))
+            return (
+              <li key={i} className="px-4 py-2.5 text-sm">
+                <div className="flex items-center justify-between">
+                  <div className="font-semibold text-slate-800">{it.nombre}</div>
+                  <div className="font-bold text-slate-800">{formatMoney(net, sym)}</div>
+                </div>
                 <div className="text-xs text-slate-400">
                   {it.cantidad} x {formatMoney(it.precioUnitario, sym)}
+                  {pct > 0 && (
+                    <span className="text-emerald-600"> · {pct}% dcto (-{formatMoney(round2(it.subtotal - net), sym)})</span>
+                  )}
                 </div>
-              </div>
-              <div className="font-bold text-slate-800">{formatMoney(it.subtotal, sym)}</div>
-            </li>
-          ))}
+              </li>
+            )
+          })}
         </ul>
         <div className="px-4 py-3 border-t border-slate-100 space-y-1 text-sm">
           <div className="flex justify-between text-slate-600">
@@ -183,6 +213,28 @@ export default function SaleDetail() {
         </div>
       )}
 
+      {sale.devoluciones && sale.devoluciones.length > 0 && (
+        <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
+          <h2 className="font-bold text-slate-800 px-4 py-3 border-b border-slate-100">
+            Devoluciones ({formatMoney(sale.devoluciones.reduce((acc, d) => acc + d.monto, 0), sym)})
+          </h2>
+          <ul className="divide-y divide-slate-100">
+            {sale.devoluciones.map((d) => (
+              <li key={d.id} className="px-4 py-2.5 text-sm">
+                <div className="flex items-center justify-between">
+                  <div className="font-semibold text-red-600">-{formatMoney(d.monto, sym)}</div>
+                  <div className="text-xs text-slate-400">{formatDateTime(d.fecha)} · {d.usuario}</div>
+                </div>
+                {d.motivo && <div className="text-xs text-slate-500 mt-0.5">{d.motivo}</div>}
+                <div className="text-xs text-slate-400 mt-1">
+                  {d.items.map((it) => `${it.nombre} (${it.cantidad})`).join(', ')}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {sale.saldo > 0 && (
         <PaymentModal
           sale={sale}
@@ -197,7 +249,172 @@ export default function SaleDetail() {
           }}
         />
       )}
-    </div>
+
+      <DevolucionModal
+          sale={sale}
+          config={config}
+          open={devOpen}
+          onClose={() => setDevOpen(false)}
+          sym={sym}
+          onDone={async (devolucion: Devolucion) => {
+            await registrarDevolucion(sale, devolucion)
+            const updated = await getSale(id!)
+            setSale(updated)
+            setDevOpen(false)
+          }}
+        />
+      </div>
+    )
+  }
+
+function DevolucionModal({
+  sale,
+  config,
+  open,
+  onClose,
+  sym,
+  onDone,
+}: {
+  sale: Sale
+  config: StoreConfig
+  open: boolean
+  onClose: () => void
+  sym: string
+  onDone: (devolucion: Devolucion) => Promise<void>
+}) {
+  const { user, nombre } = useAuth()
+  const [cantidades, setCantidades] = useState<Record<string, number>>({})
+  const [motivo, setMotivo] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (open) {
+      setCantidades({})
+      setMotivo('')
+      setError('')
+    }
+  }, [open])
+
+  const seleccion = sale.items
+    .map((it, i) => {
+      const cat = cantidades[i] ?? 0
+      return { item: it, idx: i, cantidad: cat }
+    })
+    .filter((x) => x.cantidad > 0)
+
+  const monto = round2(seleccion.reduce((acc, x) => acc + x.cantidad * x.item.precioUnitario, 0))
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (monto <= 0) {
+      setError('Seleccione al menos un articulo y una cantidad a devolver.')
+      return
+    }
+    if (monto > sale.total - (sale.devoluciones ?? []).reduce((acc, d) => acc + d.monto, 0)) {
+      playError()
+      setError('El monto a devolver supera el total restante de la venta.')
+      return
+    }
+    setError('')
+    setSaving(true)
+    try {
+      const devolucion: Devolucion = {
+        id: `d_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        fecha: Date.now(),
+        usuario: nombre || user?.email || '',
+        motivo: motivo.trim(),
+        items: seleccion.map<DevolucionItem>(({ item, cantidad }) => ({
+          productoId: item.productoId,
+          nombre: item.nombre,
+          cantidad,
+          precioUnitario: item.precioUnitario,
+          subtotal: round2(cantidad * item.precioUnitario),
+        })),
+        monto,
+      }
+      await onDone(devolucion)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title={`Devolucion del recibo #${sale.folio}`}>
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div className="max-h-64 overflow-y-auto divide-y divide-slate-100 border border-slate-200 rounded-xl">
+          {sale.items.map((it, i) => {
+            const cat = cantidades[i] ?? 0
+            return (
+              <div key={i} className="flex items-center justify-between gap-3 px-3 py-2">
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-slate-800 truncate">{it.nombre}</div>
+                  <div className="text-xs text-slate-400">
+                    {it.cantidad} x {formatMoney(it.precioUnitario, sym)}
+                  </div>
+                </div>
+                <div className="flex items-center gap-1 w-24 shrink-0 justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setCantidades((prev) => ({ ...prev, [i]: Math.max((prev[i] ?? 0) - it.cantidad, 0) }))}
+                    className="w-7 h-7 rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200 flex items-center justify-center"
+                  >
+                    <Icon name="minus" size={13} />
+                  </button>
+                  <span className="w-9 text-center font-bold text-slate-800 text-sm">{cat || '0'}</span>
+                  <button
+                    type="button"
+                    onClick={() => setCantidades((prev) => ({ ...prev, [i]: Math.min((prev[i] ?? 0) + it.cantidad, it.cantidad) }))}
+                    className="w-7 h-7 rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200 flex items-center justify-center"
+                  >
+                    <Icon name="plus" size={13} />
+                  </button>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+
+        <div className="bg-red-50 border border-red-200 rounded-xl px-3 py-2 text-sm">
+          <div className="flex justify-between font-bold text-red-700">
+            <span>Monto a devolver</span>
+            <span>{formatMoney(monto, sym)}</span>
+          </div>
+          <div className="flex justify-between text-xs text-slate-500 mt-0.5">
+            <span>Total restante de la venta</span>
+            <span>{formatMoney(sale.total - (sale.devoluciones ?? []).reduce((acc, d) => acc + d.monto, 0), sym)}</span>
+          </div>
+          {sale.tipo === 'credito' && (
+            <p className="text-xs text-slate-500 mt-1">
+              Si hay saldo pendiente, la devolucion se descuenta del saldo del cliente.
+            </p>
+          )}
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-slate-700 mb-1">Motivo de la devolucion</label>
+          <input
+            type="text"
+            value={motivo}
+            onChange={(e) => setMotivo(e.target.value)}
+            className="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
+            placeholder="Opcional"
+          />
+        </div>
+
+        {error && (
+          <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>
+        )}
+
+        <button
+          type="submit"
+          disabled={saving}
+          className="w-full py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white font-semibold text-sm disabled:opacity-60"
+        >
+          {saving ? 'Registrando...' : `Registrar devolucion (${formatMoney(monto, sym)})`}
+        </button>
+      </form>
+    </Modal>
   )
 }
 

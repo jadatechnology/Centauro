@@ -1,6 +1,7 @@
 import { getSales } from './saleService'
 import { getProducts } from './productService'
 import { getClients } from './clientService'
+import { stockDe } from '../utils/stock'
 
 export interface DashboardStats {
   ventasHoy: number
@@ -25,7 +26,7 @@ export function startOfMonth(ts: number): number {
   return d.getTime()
 }
 
-export async function getDashboardStats(): Promise<DashboardStats> {
+export async function getDashboardStats(sedeId?: string): Promise<DashboardStats> {
   const [ventas, productos, clientes] = await Promise.all([
     getSales(),
     getProducts(),
@@ -36,16 +37,17 @@ export async function getDashboardStats(): Promise<DashboardStats> {
   const hoyIni = startOfDay(now)
   const mesIni = startOfMonth(now)
 
-  const ventasHoy = ventas.filter((v) => v.createdAt >= hoyIni)
-  const ventasMes = ventas.filter((v) => v.createdAt >= mesIni)
+  const ventasSede = sedeId ? ventas.filter((v) => v.sedeId === sedeId) : ventas
+  const ventasHoy = ventasSede.filter((v) => v.createdAt >= hoyIni)
+  const ventasMes = ventasSede.filter((v) => v.createdAt >= mesIni)
 
   return {
     ventasHoy: ventasHoy.length,
     totalHoy: ventasHoy.reduce((acc, v) => acc + (v.total || 0), 0),
     ventasMes: ventasMes.length,
     totalMes: ventasMes.reduce((acc, v) => acc + (v.total || 0), 0),
-    porCobrar: ventas.reduce((acc, v) => acc + (v.saldo || 0), 0),
-    productosBajoStock: productos.filter((p) => p.activo && p.stock <= p.stockMinimo).length,
+    porCobrar: ventasSede.reduce((acc, v) => acc + (v.saldo || 0), 0),
+    productosBajoStock: productos.filter((p) => p.activo && stockDe(p, sedeId) <= p.stockMinimo).length,
     clientes: clientes.filter((c) => c.activo).length,
   }
 }

@@ -23,13 +23,13 @@ function dateStr() {
 export async function exportJSON(products: Product[], clients: Client[], sales: Sale[]): Promise<void> {
   const data = {
     exportedAt: new Date().toISOString(),
-    app: 'Mi Tienda - jada-comercio',
+    app: 'Centauro',
     products,
     clients,
     sales,
   }
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
-  downloadFile(blob, `backup-mi-tienda-${dateStr()}.json`)
+  downloadFile(blob, `backup-centauro-${dateStr()}.json`)
 }
 
 /* ───────── Excel ───────── */
@@ -99,7 +99,7 @@ export async function exportExcel(products: Product[], clients: Client[], sales:
     XLSX.utils.book_append_sheet(wb, wsPagos, 'Abonos')
   }
 
-  XLSX.writeFile(wb, `backup-mi-tienda-${dateStr()}.xlsx`)
+  XLSX.writeFile(wb, `backup-centauro-${dateStr()}.xlsx`)
 }
 
 /* ───────── PDF ───────── */
@@ -175,7 +175,7 @@ export function exportPDF(
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(10)
   doc.setTextColor(...gray)
-  doc.text(config.company || 'Mi Tienda', margin, y)
+  doc.text(config.company || 'Centauro', margin, y)
   y += 4
   doc.text(`Fecha: ${new Date().toLocaleDateString('es')}  |  Hora: ${new Date().toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })}`, margin, y)
   y += 4
@@ -240,8 +240,8 @@ export function exportPDF(
   doc.setFont('helvetica', 'italic')
   doc.setFontSize(7)
   doc.setTextColor(...gray)
-  doc.text('Generado por Mi Tienda', margin, lastPageH - 8)
+  doc.text('Generado por Centauro', margin, lastPageH - 8)
 
   const blob = doc.output('blob')
-  downloadFile(blob, `backup-mi-tienda-${dateStr()}.pdf`)
+  downloadFile(blob, `backup-centauro-${dateStr()}.pdf`)
 }

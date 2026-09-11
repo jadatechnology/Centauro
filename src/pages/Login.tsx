@@ -1,8 +1,8 @@
-import { useState, FormEvent } from 'react'
+import { useState, useEffect, FormEvent } from 'react'
 import { signInWithEmailAndPassword } from 'firebase/auth'
 import { useNavigate } from 'react-router-dom'
 import { auth } from '../config/firebase'
-import { APP_CONFIG } from '../config/app'
+import { getCachedStoreConfig, applyStoreConfigToUI } from '../utils/storeConfig'
 import Icon from '../components/Icon'
 import Spinner from '../components/Spinner'
 
@@ -11,7 +11,20 @@ export default function Login() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [company, setCompany] = useState('Centauro')
+  const [logo, setLogo] = useState('')
   const navigate = useNavigate()
+
+  useEffect(() => {
+    const cached = getCachedStoreConfig()
+    if (cached) {
+      if (cached.company) setCompany(cached.company)
+      if (cached.logo) {
+        setLogo(cached.logo)
+        applyStoreConfigToUI(cached)
+      }
+    }
+  }, [])
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
@@ -36,11 +49,15 @@ export default function Login() {
       <div className="w-full max-w-sm">
         <div className="bg-white rounded-2xl shadow-xl p-6">
           <div className="flex flex-col items-center mb-6">
-            <div className="w-16 h-16 bg-teal-600 rounded-2xl flex items-center justify-center text-white mb-3">
-              <Icon name="cart" size={34} />
+            <div className="w-16 h-16 bg-teal-600 rounded-2xl flex items-center justify-center text-white mb-3 overflow-hidden">
+              {logo ? (
+                <img src={logo} alt={company} className="w-full h-full object-contain" />
+              ) : (
+                <Icon name="box" size={34} />
+              )}
             </div>
-            <h1 className="text-xl font-bold text-slate-800">Mi Tienda</h1>
-            <p className="text-sm text-slate-500">{APP_CONFIG.company}</p>
+            <h1 className="text-xl font-bold text-slate-800">{company}</h1>
+            <p className="text-sm text-slate-500">{company === 'Centauro' ? 'Sistema de inventario y ventas' : ''}</p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">

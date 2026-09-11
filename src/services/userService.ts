@@ -13,6 +13,7 @@ export async function saveUser(user: AppUser) {
     role: user.role,
     nombre: user.nombre || email,
     email,
+    sedeId: user.sedeId || null,
   })
 }
 

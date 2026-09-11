@@ -1,6 +1,10 @@
 import { initializeApp } from 'firebase/app'
-import { getFirestore, enableIndexedDbPersistence } from 'firebase/firestore'
-import { getAuth } from 'firebase/auth'
+import {
+  getFirestore,
+  enableIndexedDbPersistence,
+  connectFirestoreEmulator,
+} from 'firebase/firestore'
+import { getAuth, connectAuthEmulator } from 'firebase/auth'
 
 // ============================================
 // CONFIGURACION DE FIREBASE por proyecto.
@@ -22,6 +26,13 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig)
 const db = getFirestore(app)
 const auth = getAuth(app)
+
+// Modo emulador local (solo desarrollo): VITE_USE_EMULATOR=true
+// Los datos van al emulador de Firestore/Auth, NUNCA a produccion.
+if (import.meta.env.VITE_USE_EMULATOR === 'true') {
+  connectFirestoreEmulator(db, 'localhost', 8080)
+  connectAuthEmulator(auth, 'http://localhost:9099', { disableWarnings: true })
+}
 
 enableIndexedDbPersistence(db).catch((err) => {
   if (err.code === 'failed-precondition') {

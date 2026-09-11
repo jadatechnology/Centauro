@@ -1,19 +1,25 @@
 import { NavLink } from 'react-router-dom'
+import { useAuth } from '../context/AuthContext'
 import Icon from './Icon'
 
-const items = [
-  { to: '/', label: 'Inicio', icon: 'home' },
-  { to: '/vender', label: 'Vender', icon: 'cart' },
-  { to: '/ventas', label: 'Ventas', icon: 'wallet' },
-  { to: '/creditos', label: 'Creditos', icon: 'credit' },
-  { to: '/productos', label: 'Productos', icon: 'box' },
-  { to: '/clientes', label: 'Clientes', icon: 'users' },
-]
-
 export default function BottomNav() {
+  const { role } = useAuth()
+
+  const items = [
+    { to: '/', label: 'Inicio', icon: 'home' },
+    { to: '/vender', label: 'Vender', icon: 'cart' },
+    { to: '/ventas', label: 'Ventas', icon: 'wallet' },
+    { to: '/creditos', label: 'Creditos', icon: 'credit' },
+    { to: '/clientes', label: 'Clientes', icon: 'users' },
+  ]
+
+  if (role === 'admin') {
+    items.push({ to: '/productos', label: 'Productos', icon: 'box' })
+  }
+
   return (
     <nav className="md:hidden fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 z-40 pb-safe">
-      <div className="grid grid-cols-6">
+      <div className={`grid ${items.length === 5 ? 'grid-cols-5' : 'grid-cols-6'}`}>
         {items.map((item) => (
           <NavLink
             key={item.to}

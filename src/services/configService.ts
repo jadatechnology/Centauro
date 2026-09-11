@@ -13,6 +13,7 @@ const defaultConfig: StoreConfig = {
   receiptFooter: APP_CONFIG.receiptFooter,
   currencySymbol: APP_CONFIG.currencySymbol,
   receiptMode: APP_CONFIG.receiptMode,
+  usarVencimiento: true,
 }
 
 export async function getStoreConfig(): Promise<StoreConfig> {

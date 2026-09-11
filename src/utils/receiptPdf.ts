@@ -1,6 +1,6 @@
 import { jsPDF } from 'jspdf'
 import type { Sale, StoreConfig } from '../types'
-import { formatMoney, formatDateTime } from './format'
+import { formatMoney, formatDateTime, round2 } from './format'
 import { type ReceiptWidth } from './print'
 
 export function isMobileDevice(): boolean {
@@ -128,9 +128,11 @@ function renderReceipt(
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(fs(10))
   for (const it of sale.items) {
+    const pct = it.descuentoPct || 0
+    const net = round2(it.subtotal * (1 - pct / 100))
     const descLines = doc.splitTextToSize(it.nombre, descW) as string[]
     const qtyLine = String(it.cantidad)
-    const totalLine = formatMoney(it.subtotal, sym)
+    const totalLine = formatMoney(net, sym)
     const n = Math.max(descLines.length, 1)
     ensureSpace(n * 4.6 * scale + 1)
     for (let i = 0; i < n; i++) {
@@ -139,6 +141,13 @@ function renderReceipt(
       doc.text(descLines[i] ?? '', descStart, y)
       if (i === 0) doc.text(totalLine, pageW - margin, y, { align: 'right' })
       y += 4.6 * scale
+    }
+    if (pct > 0) {
+      doc.setFontSize(fs(8))
+      doc.setTextColor(...gray)
+      doc.text(`${it.cantidad} x ${formatMoney(it.precioUnitario, sym)} (${pct}% dcto) -${formatMoney(round2(it.subtotal - net), sym)}`, descStart, y)
+      y += 3
+      doc.setFontSize(fs(10))
     }
     y += 1
   }
@@ -157,7 +166,7 @@ function renderReceipt(
     y += 2
     text(config.receiptFooter, { size: 10, align: 'center', color: gray })
   }
-  text('Generado por Mi Tienda', { size: 8, align: 'center', color: gray })
+  text('Generado por Centauro', { size: 8, align: 'center', color: gray })
 
   return y
 }

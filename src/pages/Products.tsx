@@ -2,8 +2,10 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { getProducts, deleteProduct } from '../services/productService'
 import { getStoreConfig } from '../services/configService'
+import { useSede } from '../context/SedeContext'
 import type { Product, StoreConfig } from '../types'
 import { formatMoney } from '../utils/format'
+import { stockDe } from '../utils/stock'
 import { playBeep, playError } from '../utils/sound'
 import Icon from '../components/Icon'
 import Spinner from '../components/Spinner'
@@ -21,6 +23,7 @@ export default function Products() {
   const [config, setConfig] = useState<StoreConfig>({
     company: '', slogan: '', taxRegime: '', address: '', phone: '', receiptFooter: '', currencySymbol: '$', receiptMode: 'auto',
   })
+  const { sede } = useSede()
   const navigate = useNavigate()
 
   const load = async () => {
@@ -47,7 +50,7 @@ export default function Products() {
     return products
       .filter((p) => p.activo)
       .filter((p) => (categoria ? p.categoria === categoria : true))
-      .filter((p) => (bajoStock ? p.stock <= p.stockMinimo : true))
+      .filter((p) => (bajoStock ? stockDe(p, sede?.id) <= p.stockMinimo : true))
       .filter(
         (p) =>
           !q ||
@@ -55,7 +58,7 @@ export default function Products() {
           p.codigo.toLowerCase().includes(q) ||
           p.categoria.toLowerCase().includes(q)
       )
-  }, [products, search, categoria, bajoStock])
+  }, [products, search, categoria, bajoStock, sede])
 
   const sym = config.currencySymbol || '$'
 
@@ -82,7 +85,10 @@ export default function Products() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-800">Inventario</h1>
-          <p className="text-slate-500 text-sm">{filtered.length} productos activos</p>
+          <p className="text-slate-500 text-sm">
+            {filtered.length} productos activos
+            {sede ? ` · ${sede.nombre}` : ''}
+          </p>
         </div>
         <div className="flex gap-2">
           <button
@@ -186,7 +192,8 @@ export default function Products() {
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {filtered.map((p) => {
-                  const low = p.stock <= p.stockMinimo
+                  const stockActual = stockDe(p, sede?.id)
+                  const low = stockActual <= p.stockMinimo
                   return (
                     <tr key={p.id} className="hover:bg-slate-50">
                       <td className="px-4 py-3" data-no-label>
@@ -208,11 +215,11 @@ export default function Products() {
                       <td className="px-4 py-3 text-center" data-label="Stock">
                         <span
                           className={`inline-flex items-center gap-1 font-bold ${
-                            p.stock === 0 ? 'text-red-600' : low ? 'text-amber-600' : 'text-slate-700'
+                            stockActual === 0 ? 'text-red-600' : low ? 'text-amber-600' : 'text-slate-700'
                           }`}
                         >
-                          {p.stock === 0 && <Icon name="x" size={12} />}
-                          {p.stock}
+                          {stockActual === 0 && <Icon name="x" size={12} />}
+                          {stockActual}
                         </span>
                         {low && <div className="text-[10px] text-slate-400">min {p.stockMinimo}</div>}
                       </td>

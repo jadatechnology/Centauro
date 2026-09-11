@@ -1,12 +1,13 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react'
 import { onAuthStateChanged, signOut, User } from 'firebase/auth'
-import { doc, getDoc, setDoc } from 'firebase/firestore'
+import { doc, getDoc, setDoc, collection, query, where, getDocs } from 'firebase/firestore'
 import { auth, db } from '../config/firebase'
 
 interface AuthUser {
   user: User | null
   role: 'admin' | 'user' | null
   nombre: string
+  sedeId: string | null
   loading: boolean
   logout: () => Promise<void>
 }
@@ -15,6 +16,7 @@ const AuthContext = createContext<AuthUser>({
   user: null,
   role: null,
   nombre: '',
+  sedeId: null,
   loading: true,
   logout: async () => {},
 })
@@ -23,6 +25,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [role, setRole] = useState<'admin' | 'user' | null>(null)
   const [nombre, setNombre] = useState('')
+  const [sedeId, setSedeId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -37,18 +40,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             const data = snap.data()
             setRole(data.role === 'admin' ? 'admin' : 'user')
             setNombre(data.nombre || u.displayName || email)
+            setSedeId(data.sedeId || null)
           } else {
-            await setDoc(ref, { role: 'admin', email, nombre: 'Administrador' })
-            setRole('admin')
-            setNombre('Administrador')
+            // Cuenta sin documento: solo se vuelve administrador si es la primera
+            // cuenta del sistema. Si ya existe un admin, se crea como usuario normal.
+            const yaExisteAdmin = await getDocs(query(collection(db, 'users'), where('role', '==', 'admin')))
+            const esAdmin = yaExisteAdmin.empty
+            await setDoc(ref, { role: esAdmin ? 'admin' : 'user', email, nombre: esAdmin ? 'Administrador' : email, sedeId: null })
+            setRole(esAdmin ? 'admin' : 'user')
+            setNombre(esAdmin ? 'Administrador' : email)
+            setSedeId(null)
           }
         } catch {
           setRole('user')
           setNombre(u.email || '')
+          setSedeId(null)
         }
       } else {
         setRole(null)
         setNombre('')
+        setSedeId(null)
       }
       setLoading(false)
     })
@@ -60,7 +71,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, role, nombre, loading, logout }}>
+    <AuthContext.Provider value={{ user, role, nombre, sedeId, loading, logout }}>
       {children}
     </AuthContext.Provider>
   )

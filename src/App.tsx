@@ -1,6 +1,9 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import { lazy, Suspense, ReactNode } from 'react'
+import { lazy, Suspense, ReactNode, useEffect } from 'react'
 import { AuthProvider, useAuth } from './context/AuthContext'
+import { SedeProvider } from './context/SedeContext'
+import { getStoreConfig } from './services/configService'
+import { applyStoreConfigToUI, getCachedStoreConfig, cacheStoreConfig } from './utils/storeConfig'
 import Header from './components/Header'
 import BottomNav from './components/BottomNav'
 import Login from './pages/Login'
@@ -60,6 +63,21 @@ function AdminRoute({ children }: { children: ReactNode }) {
 function AppContent() {
   const { user, loading } = useAuth()
 
+  useEffect(() => {
+    const cached = getCachedStoreConfig()
+    if (cached) applyStoreConfigToUI(cached)
+  }, [])
+
+  useEffect(() => {
+    if (!user) return
+    getStoreConfig()
+      .then((cfg) => {
+        cacheStoreConfig(cfg)
+        applyStoreConfigToUI(cfg)
+      })
+      .catch(() => {})
+  }, [user])
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-screen">
@@ -79,9 +97,9 @@ function AppContent() {
           <Route path="/ventas" element={<ProtectedRoute><SuspenseWrap><SalesList /></SuspenseWrap></ProtectedRoute>} />
           <Route path="/venta/:id" element={<ProtectedRoute><SuspenseWrap><SaleDetail /></SuspenseWrap></ProtectedRoute>} />
           <Route path="/creditos" element={<ProtectedRoute><SuspenseWrap><CreditAccounts /></SuspenseWrap></ProtectedRoute>} />
-          <Route path="/productos" element={<ProtectedRoute><SuspenseWrap><Products /></SuspenseWrap></ProtectedRoute>} />
-          <Route path="/producto/nuevo" element={<ProtectedRoute><SuspenseWrap><ProductForm /></SuspenseWrap></ProtectedRoute>} />
-          <Route path="/producto/:id" element={<ProtectedRoute><SuspenseWrap><ProductForm /></SuspenseWrap></ProtectedRoute>} />
+          <Route path="/productos" element={<AdminRoute><SuspenseWrap><Products /></SuspenseWrap></AdminRoute>} />
+          <Route path="/producto/nuevo" element={<AdminRoute><SuspenseWrap><ProductForm /></SuspenseWrap></AdminRoute>} />
+          <Route path="/producto/:id" element={<AdminRoute><SuspenseWrap><ProductForm /></SuspenseWrap></AdminRoute>} />
           <Route path="/clientes" element={<ProtectedRoute><SuspenseWrap><Clients /></SuspenseWrap></ProtectedRoute>} />
           <Route path="/cliente/nuevo" element={<ProtectedRoute><SuspenseWrap><ClientForm /></SuspenseWrap></ProtectedRoute>} />
           <Route path="/cliente/:id" element={<ProtectedRoute><SuspenseWrap><ClientDetail /></SuspenseWrap></ProtectedRoute>} />
@@ -100,7 +118,9 @@ export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <AppContent />
+        <SedeProvider>
+          <AppContent />
+        </SedeProvider>
       </AuthProvider>
     </BrowserRouter>
   )

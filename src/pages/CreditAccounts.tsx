@@ -4,6 +4,7 @@ import { getSales, addPayment } from '../services/saleService'
 import { getClients } from '../services/clientService'
 import { getStoreConfig } from '../services/configService'
 import { useAuth } from '../context/AuthContext'
+import { useSede } from '../context/SedeContext'
 import type { Sale, StoreConfig, Client } from '../types'
 import { formatMoney, formatDateTime } from '../utils/format'
 import { printReceipt, getReceiptWidth } from '../utils/print'
@@ -14,6 +15,7 @@ import Modal from '../components/Modal'
 
 export default function CreditAccounts() {
   const { user, nombre } = useAuth()
+  const { sede, puedeCambiarSede } = useSede()
   const [sales, setSales] = useState<Sale[]>([])
   const [clients, setClients] = useState<Client[]>([])
   const [loading, setLoading] = useState(true)
@@ -21,6 +23,8 @@ export default function CreditAccounts() {
     company: '', slogan: '', taxRegime: '', address: '', phone: '', receiptFooter: '', currencySymbol: '$', receiptMode: 'auto',
   })
   const [paySale, setPaySale] = useState<Sale | null>(null)
+  const [soloSede, setSoloSede] = useState(true)
+  const verSoloSede = !puedeCambiarSede || soloSede
 
   useEffect(() => {
     let active = true
@@ -41,9 +45,14 @@ export default function CreditAccounts() {
     }
   }, [])
 
+  const salesSede = useMemo(
+    () => (verSoloSede && sede ? sales.filter((v) => !v.sedeId || v.sedeId === sede.id) : sales),
+    [sales, verSoloSede, sede]
+  )
+
   const pendientes = useMemo(
-    () => sales.filter((v) => v.tipo === 'credito' && (v.saldo ?? 0) > 0),
-    [sales]
+    () => salesSede.filter((v) => v.tipo === 'credito' && (v.saldo ?? 0) > 0),
+    [salesSede]
   )
   const totalPendiente = pendientes.reduce((acc, v) => acc + (v.saldo ?? 0), 0)
   const sym = config.currencySymbol || '$'
@@ -66,12 +75,25 @@ export default function CreditAccounts() {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-800">Cuentas por cobrar</h1>
-        <p className="text-slate-500 text-sm">
-          {pendientes.length} creditos activos · Total pendiente{' '}
-          <span className="font-bold text-amber-600">{formatMoney(totalPendiente, sym)}</span>
-        </p>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-800">Cuentas por cobrar</h1>
+          <p className="text-slate-500 text-sm">
+            {pendientes.length} creditos activos · Total pendiente{' '}
+            <span className="font-bold text-amber-600">{formatMoney(totalPendiente, sym)}</span>
+          </p>
+        </div>
+        {puedeCambiarSede && sede && (
+          <button
+            onClick={() => setSoloSede((v) => !v)}
+            title={soloSede ? `Mostrando solo ${sede.nombre}` : 'Mostrando todas las sedes'}
+            className={`px-3 py-2 rounded-xl text-sm font-medium ${
+              soloSede ? 'bg-teal-600 text-white' : 'bg-white border border-slate-300 text-slate-600'
+            }`}
+          >
+            {soloSede ? `Solo ${sede.nombre}` : 'Todas las sedes'}
+          </button>
+        )}
       </div>
 
       {pendientes.length === 0 ? (
@@ -83,7 +105,7 @@ export default function CreditAccounts() {
         <div className="space-y-4">
           {grupos.map((g) => {
             const cliente = g.clienteId ? clients.find((cl) => cl.id === g.clienteId) ?? null : null
-            const ventasCliente = g.clienteId ? sales.filter((s) => s.clienteId === g.clienteId) : g.ventas
+            const ventasCliente = g.clienteId ? salesSede.filter((s) => s.clienteId === g.clienteId) : g.ventas
             return (
               <div key={g.key} className="bg-white rounded-2xl shadow-sm overflow-hidden">
                 <div className="px-4 py-3 bg-slate-50 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2">

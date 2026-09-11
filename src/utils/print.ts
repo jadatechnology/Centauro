@@ -1,5 +1,5 @@
 import type { Sale, StoreConfig } from '../types'
-import { formatMoney, formatDateTime } from './format'
+import { formatMoney, formatDateTime, round2 } from './format'
 import { openReceiptPdf, isMobileDevice } from './receiptPdf'
 
 export type ReceiptWidth = '80' | '55'
@@ -44,14 +44,22 @@ export function buildReceiptHtml(
   const sym = config.currencySymbol || '$'
   const s = WIDTH_STYLES[width]
   const items = sale.items
-    .map(
-      (it) => `
+    .map((it) => {
+      const pct = it.descuentoPct || 0
+      const net = round2(it.subtotal * (1 - pct / 100))
+      const desc = pct > 0 ? `${it.cantidad} x ${formatMoney(it.precioUnitario, sym)} (${pct}% dcto)` : `${it.cantidad} x ${formatMoney(it.precioUnitario, sym)}`
+      return `
       <tr>
         <td class="q">${it.cantidad}</td>
         <td class="desc">${escapeHtml(it.nombre)}</td>
-        <td class="num">${formatMoney(it.subtotal, sym)}</td>
+        <td class="num">${formatMoney(net, sym)}</td>
+      </tr>
+      <tr>
+        <td></td>
+        <td class="lineinfo">${escapeHtml(desc)}</td>
+        <td class="num">${pct > 0 ? `-${formatMoney(round2(it.subtotal - net), sym)}` : ''}</td>
       </tr>`
-    )
+    })
     .join('')
 
   const tipoLabel = sale.tipo === 'credito' ? 'CREDITO' : 'CONTADO'
@@ -84,6 +92,7 @@ export function buildReceiptHtml(
   td.q { width: ${width === '55' ? '16px' : '22px'}; text-align: center; }
   td.desc { width: auto; }
   td.num { text-align: right; white-space: nowrap; }
+  td.lineinfo { font-size: ${width === '55' ? '7px' : '9px'}; color: #555; padding-top: 0; }
   .totals { width: 100%; margin: 4px 0; }
   .totals td { font-size: ${s.small}; }
   .totals .total { font-size: ${s.total}; font-weight: 700; }

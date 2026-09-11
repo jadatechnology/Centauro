@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { getClients } from '../services/clientService'
 import { getSales } from '../services/saleService'
 import { getStoreConfig } from '../services/configService'
+import { useSede } from '../context/SedeContext'
 import type { Client, Sale, StoreConfig } from '../types'
 import { formatMoney } from '../utils/format'
 import Icon from '../components/Icon'
@@ -16,6 +17,15 @@ export default function Clients() {
   const [config, setConfig] = useState<StoreConfig>({
     company: '', slogan: '', taxRegime: '', address: '', phone: '', receiptFooter: '', currencySymbol: '$', receiptMode: 'auto',
   })
+  const { sede, puedeCambiarSede } = useSede()
+  const [soloSede, setSoloSede] = useState(true)
+  const verSoloSede = !puedeCambiarSede || soloSede
+
+  // Los clientes son compartidos entre sedes, pero el saldo pendiente se muestra por sede
+  const salesSede = useMemo(
+    () => (verSoloSede && sede ? sales.filter((v) => !v.sedeId || v.sedeId === sede.id) : sales),
+    [sales, verSoloSede, sede]
+  )
 
   useEffect(() => {
     let active = true
@@ -38,13 +48,13 @@ export default function Clients() {
 
   const saldoByClient = useMemo(() => {
     const map: Record<string, number> = {}
-    for (const sale of sales) {
+    for (const sale of salesSede) {
       if (sale.tipo === 'credito' && sale.clienteId) {
         map[sale.clienteId] = (map[sale.clienteId] ?? 0) + (sale.saldo ?? 0)
       }
     }
     return map
-  }, [sales])
+  }, [salesSede])
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -73,13 +83,26 @@ export default function Clients() {
             {filtered.length} clientes · Pendiente total {formatMoney(totalPendiente, sym)}
           </p>
         </div>
-        <Link
-          to="/cliente/nuevo"
-          className="px-4 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-semibold text-sm flex items-center gap-2"
-        >
-          <Icon name="plus" size={18} />
-          Nuevo cliente
-        </Link>
+        <div className="flex items-center gap-2">
+          {puedeCambiarSede && sede && (
+            <button
+              onClick={() => setSoloSede((v) => !v)}
+              title={soloSede ? `Mostrando solo ${sede.nombre}` : 'Mostrando todas las sedes'}
+              className={`px-3 py-2.5 rounded-xl text-sm font-medium ${
+                soloSede ? 'bg-teal-600 text-white' : 'bg-white border border-slate-300 text-slate-600'
+              }`}
+            >
+              {soloSede ? `Solo ${sede.nombre}` : 'Todas las sedes'}
+            </button>
+          )}
+          <Link
+            to="/cliente/nuevo"
+            className="px-4 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-semibold text-sm flex items-center gap-2"
+          >
+            <Icon name="plus" size={18} />
+            Nuevo cliente
+          </Link>
+        </div>
       </div>
 
       <div className="relative">

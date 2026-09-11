@@ -1,5 +1,5 @@
 export const APP_CONFIG = {
-  company: 'Mi Tienda',
+  company: 'Centauro',
   slogan: 'Inventario y Ventas',
   taxRegime: 'Regimen Simplificado',
   address: '',

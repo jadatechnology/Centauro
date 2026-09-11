@@ -5,13 +5,16 @@ import { getSales } from '../services/saleService'
 import { getProducts } from '../services/productService'
 import { getStoreConfig } from '../services/configService'
 import { useAuth } from '../context/AuthContext'
+import { useSede } from '../context/SedeContext'
 import type { Sale, Product, StoreConfig } from '../types'
 import { formatMoney, formatDateTime } from '../utils/format'
+import { stockDe } from '../utils/stock'
 import Icon from '../components/Icon'
 import Spinner from '../components/Spinner'
 
 export default function Dashboard() {
-  const { nombre } = useAuth()
+  const { nombre, role } = useAuth()
+  const { sede, sedes } = useSede()
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [recentSales, setRecentSales] = useState<Sale[]>([])
   const [lowStock, setLowStock] = useState<Product[]>([])
@@ -22,15 +25,18 @@ export default function Dashboard() {
     const load = async () => {
       try {
         const [s, sales, products, cfg] = await Promise.all([
-          getDashboardStats(),
+          getDashboardStats(sede?.id),
           getSales(),
           getProducts(),
           getStoreConfig(),
         ])
         if (!active) return
         setStats(s)
-        setRecentSales(sales.slice(0, 5))
-        setLowStock(products.filter((p) => p.activo && p.stock <= p.stockMinimo).slice(0, 5))
+        const salesSede = sede ? sales.filter((v) => v.sedeId === sede.id) : sales
+        setRecentSales(salesSede.slice(0, 5))
+        setLowStock(
+          products.filter((p) => p.activo && stockDe(p, sede?.id) <= p.stockMinimo).slice(0, 5)
+        )
         setConfig(cfg)
       } catch {
         if (active) {
@@ -50,7 +56,7 @@ export default function Dashboard() {
     return () => {
       active = false
     }
-  }, [])
+  }, [sede])
 
   const sym = config.currencySymbol || '$'
 
@@ -78,21 +84,26 @@ export default function Dashboard() {
       icon: 'credit',
       color: 'bg-amber-500',
     },
-    {
+  ]
+
+  if (role === 'admin') {
+    cards.push({
       label: 'Stock bajo',
       value: `${stats.productosBajoStock}`,
       sub: `${stats.clientes} clientes activos`,
       icon: 'box',
       color: stats.productosBajoStock > 0 ? 'bg-red-600' : 'bg-emerald-600',
-    },
-  ]
+    })
+  }
 
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-800">Hola, {nombre.split(' ')[0]}</h1>
-          <p className="text-slate-500 text-sm">{config.company}</p>
+          <p className="text-slate-500 text-sm">
+            {sede ? `${config.company} · ${sede.nombre}` : config.company}
+          </p>
         </div>
         <Link
           to="/vender"
@@ -159,6 +170,7 @@ export default function Dashboard() {
           )}
         </div>
 
+        {role === 'admin' && (
         <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
           <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
             <h2 className="font-bold text-slate-800">Stock bajo</h2>
@@ -181,13 +193,25 @@ export default function Dashboard() {
                       <div className="text-xs text-slate-400">
                         {p.codigo} {p.categoria ? `· ${p.categoria}` : ''}
                       </div>
+                      <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1">
+                        {sedes.map((s) => {
+                          const cant = stockDe(p, s.id)
+                          const esActual = s.id === sede?.id
+                          return (
+                            <span key={s.id} className="text-[11px] text-slate-500">
+                              <span className={esActual ? 'font-bold text-slate-700' : 'font-medium'}>{s.nombre}:</span>{' '}
+                              <span className={cant === 0 ? 'text-red-600' : 'text-amber-600'}>{cant} uds</span>
+                            </span>
+                          )
+                        })}
+                      </div>
                     </div>
                     <div
                       className={`text-sm font-bold ${
-                        p.stock === 0 ? 'text-red-600' : 'text-amber-600'
+                        stockDe(p, sede?.id) === 0 ? 'text-red-600' : 'text-amber-600'
                       }`}
                     >
-                      {p.stock} uds
+                      {stockDe(p, sede?.id)} uds
                     </div>
                   </Link>
                 </li>
@@ -195,6 +219,7 @@ export default function Dashboard() {
             </ul>
           )}
         </div>
+        )}
       </div>
     </div>
   )

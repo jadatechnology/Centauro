@@ -5,8 +5,10 @@ import { getClients } from '../services/clientService'
 import { getStoreConfig } from '../services/configService'
 import { createSale, getSale, getSales } from '../services/saleService'
 import { useAuth } from '../context/AuthContext'
+import { useSede } from '../context/SedeContext'
 import type { Product, Client, StoreConfig, SaleItem, Sale } from '../types'
 import { formatMoney, round2, titleCase } from '../utils/format'
+import { stockDe } from '../utils/stock'
 import { printReceipt, getReceiptWidth } from '../utils/print'
 import { openReceiptPdf } from '../utils/receiptPdf'
 import { playBeep, playError } from '../utils/sound'
@@ -25,7 +27,6 @@ interface Session {
   cliente: Client | null
   tipo: 'contado' | 'credito'
   abono: string
-  descuento: string
   metodoPago: string
 }
 
@@ -38,13 +39,13 @@ function createSession(): Session {
     cliente: null,
     tipo: 'contado',
     abono: '',
-    descuento: '',
     metodoPago: 'Efectivo',
   }
 }
 
 export default function POS() {
   const { user, nombre } = useAuth()
+  const { sede } = useSede()
   const [products, setProducts] = useState<Product[]>([])
   const [clients, setClients] = useState<Client[]>([])
   const [sales, setSales] = useState<Sale[]>([])
@@ -114,10 +115,10 @@ export default function POS() {
   const filteredProducts = useMemo(() => {
     const q = search.trim().toLowerCase()
     return products
-      .filter((p) => p.activo && p.stock > 0)
+      .filter((p) => p.activo && stockDe(p, sede?.id) > 0)
       .filter((p) => !q || p.nombre.toLowerCase().includes(q) || p.codigo.toLowerCase().includes(q))
       .slice(0, 10)
-  }, [products, search])
+  }, [products, search, sede])
 
   const clientResults = useMemo(() => {
     const q = clienteSearch.trim().toLowerCase()
@@ -128,16 +129,18 @@ export default function POS() {
   }, [clients, clienteSearch])
 
   const subtotal = useMemo(() => round2(active.cart.reduce((acc, it) => acc + it.subtotal, 0)), [active])
-  const desc = Number(active.descuento) || 0
+  const desc = round2(
+    active.cart.reduce((acc, it) => acc + (it.descuentoPct ?? 0) * it.subtotal / 100, 0)
+  )
   const total = round2(Math.max(subtotal - desc, 0))
   const abonoValue = active.tipo === 'credito' ? Number(active.abono) || 0 : 0
 
   const clienteSaldo = useMemo(() => {
     if (!active.cliente) return 0
     return sales
-      .filter((v) => v.clienteId === active.cliente!.id && v.tipo === 'credito')
+      .filter((v) => v.clienteId === active.cliente!.id && v.tipo === 'credito' && (!sede || !v.sedeId || v.sedeId === sede.id))
       .reduce((acc, v) => acc + (v.saldo ?? 0), 0)
-  }, [sales, active])
+  }, [sales, active, sede])
 
   const addToCart = (p: Product) => {
     playBeep()
@@ -147,9 +150,9 @@ export default function POS() {
         if (s.id !== activeId) return s
         const existing = s.cart.find((it) => it.productoId === p.id)
         const inCart = existing ? existing.cantidad : 0
-        if (inCart + 1 > p.stock) {
+        if (inCart + 1 > stockDe(p, sede?.id)) {
           playError()
-          setFeedback({ type: 'error', text: `Stock insuficiente de "${p.nombre}" (quedan ${p.stock}).` })
+          setFeedback({ type: 'error', text: `Stock insuficiente de "${p.nombre}" (quedan ${stockDe(p, sede?.id)}).` })
           return s
         }
         if (existing) {
@@ -172,6 +175,7 @@ export default function POS() {
               codigo: p.codigo,
               cantidad: 1,
               precioUnitario: p.precio,
+              descuentoPct: 0,
               subtotal: p.precio,
             },
           ],
@@ -225,9 +229,9 @@ export default function POS() {
             const next = it.cantidad + delta
             const product = products.find((p) => p.id === productoId)
             if (next <= 0) return it
-            if (product && next > product.stock) {
+            if (product && next > stockDe(product, sede?.id)) {
               playError()
-              setFeedback({ type: 'error', text: `Stock maximo disponible: ${product.stock}.` })
+              setFeedback({ type: 'error', text: `Stock maximo disponible: ${stockDe(product, sede?.id)}.` })
               return it
             }
             return { ...it, cantidad: next, subtotal: round2(next * it.precioUnitario) }
@@ -242,12 +246,27 @@ export default function POS() {
       prev.map((s) => (s.id === activeId ? { ...s, cart: s.cart.filter((it) => it.productoId !== productoId) } : s))
     )
 
+  const setLineDiscount = (productoId: string, pct: number) => {
+    const p = Math.max(0, Math.min(100, isNaN(pct) ? 0 : pct))
+    patchSessions((prev) =>
+      prev.map((s) => {
+        if (s.id !== activeId) return s
+        return {
+          ...s,
+          cart: s.cart.map((it) => (it.productoId === productoId ? { ...it, descuentoPct: p } : it)),
+        }
+      })
+    )
+  }
+
   const confirmSale = async () => {
     setFeedback(null)
     if (!active) return
     if (active.cart.length === 0) return setFeedback({ type: 'error', text: 'Agregue al menos un producto.' })
     if (active.tipo === 'credito' && !active.cliente)
       return setFeedback({ type: 'error', text: 'Para venta a credito debe seleccionar un cliente.' })
+    if (active.cart.some((it) => (it.descuentoPct ?? 0) > 100))
+      return setFeedback({ type: 'error', text: 'El descuento por producto no puede superar el 100%.' })
     if (active.tipo === 'credito' && abonoValue > total)
       return setFeedback({ type: 'error', text: 'El abono no puede superar el total.' })
     if (active.cliente && active.tipo === 'credito') {
@@ -268,7 +287,7 @@ export default function POS() {
     }
     for (const it of active.cart) {
       const product = products.find((p) => p.id === it.productoId)
-      if (product && it.cantidad > product.stock) {
+      if (product && it.cantidad > stockDe(product, sede?.id)) {
         return setFeedback({ type: 'error', text: `Stock insuficiente de "${it.nombre}".` })
       }
     }
@@ -287,6 +306,8 @@ export default function POS() {
         clienteId: active.cliente ? active.cliente.id! : null,
         clienteNombre: active.cliente ? active.cliente.nombre : '',
         usuario: nombre || user?.email || '',
+        sedeId: sede?.id,
+        sedeNombre: sede?.nombre,
       })
     } catch {
       setFeedback({ type: 'error', text: 'No se pudo registrar la venta. Verifique la conexion y vuelva a intentarlo.' })
@@ -322,7 +343,9 @@ export default function POS() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-800">Nueva venta</h1>
-          <p className="text-slate-500 text-sm">Escanee o busque los productos</p>
+          <p className="text-slate-500 text-sm">
+            {sede ? `Vendiendo en ${sede.nombre}` : 'Escanea o busca los productos'}
+          </p>
         </div>
         <button
           onClick={() => setScannerOpen(true)}
@@ -417,8 +440,8 @@ export default function POS() {
                   </div>
                   <div className="text-right">
                     <div className="font-bold text-slate-800 text-sm">{formatMoney(p.precio, sym)}</div>
-                    <div className={`text-xs ${p.stock <= p.stockMinimo ? 'text-amber-600' : 'text-slate-400'}`}>
-                      {p.stock} uds
+                    <div className={`text-xs ${stockDe(p, sede?.id) <= p.stockMinimo ? 'text-amber-600' : 'text-slate-400'}`}>
+                      {stockDe(p, sede?.id)} uds
                     </div>
                   </div>
                 </button>
@@ -500,6 +523,25 @@ export default function POS() {
                     <div className="text-sm font-semibold text-slate-800 truncate">{it.nombre}</div>
                     <div className="text-xs text-slate-400">
                       {formatMoney(it.precioUnitario, sym)} c/u
+                      {it.descuentoPct
+                        ? ` · -${it.descuentoPct}% (${formatMoney(
+                            round2(it.subtotal * (1 - (it.descuentoPct ?? 0) / 100)),
+                            sym
+                          )})`
+                        : ''}
+                    </div>
+                    <div className="flex items-center gap-1 mt-1">
+                      <span className="text-[10px] text-slate-400 uppercase tracking-wide">Desc</span>
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.1"
+                        value={it.descuentoPct ?? 0}
+                        onChange={(e) => setLineDiscount(it.productoId, Number(e.target.value))}
+                        className="w-12 px-1 py-0.5 rounded-md border border-slate-200 text-right text-xs focus:outline-none focus:ring-1 focus:ring-teal-500"
+                      />
+                      <span className="text-[10px] text-slate-400">%</span>
                     </div>
                   </div>
                   <div className="flex items-center gap-1">
@@ -518,7 +560,7 @@ export default function POS() {
                     </button>
                   </div>
                   <div className="w-20 text-right font-bold text-slate-800 text-sm">
-                    {formatMoney(it.subtotal, sym)}
+                    {formatMoney(round2(it.subtotal * (1 - (it.descuentoPct ?? 0) / 100)), sym)}
                   </div>
                   <button
                     onClick={() => removeLine(it.productoId)}
@@ -537,17 +579,12 @@ export default function POS() {
               <span>Subtotal</span>
               <span className="font-semibold">{formatMoney(subtotal, sym)}</span>
             </div>
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-slate-600">Descuento</span>
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                value={active.descuento}
-                onChange={(e) => patchActive({ descuento: e.target.value })}
-                className="w-28 px-2 py-1.5 rounded-lg border border-slate-300 text-right text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
-              />
-            </div>
+            {desc > 0 && (
+              <div className="flex justify-between text-slate-600">
+                <span>Descuento</span>
+                <span className="font-semibold">-{formatMoney(desc, sym)}</span>
+              </div>
+            )}
             <div className="flex justify-between text-lg font-bold text-slate-800">
               <span>TOTAL</span>
               <span>{formatMoney(total, sym)}</span>
@@ -673,7 +710,7 @@ export default function POS() {
             </button>
             {clientResults.map((c) => {
               const debe = sales
-                .filter((v) => v.clienteId === c.id && v.tipo === 'credito')
+                .filter((v) => v.clienteId === c.id && v.tipo === 'credito' && (!sede || !v.sedeId || v.sedeId === sede.id))
                 .reduce((acc, v) => acc + (v.saldo ?? 0), 0)
               return (
                 <button
